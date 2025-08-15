@@ -10,14 +10,22 @@ use jni::objects::{GlobalRef, JByteArray, JObject, JValue};
 use jni::sys::jsize;
 use jni::JNIEnv;
 
-/// Wrapper for [`JObject`]s that contain `org.apache.commons.io.input.ReaderInputStream`
+/// Optimized wrapper for [`JObject`]s that contain `org.apache.commons.io.input.ReaderInputStream`
 /// It saves a GlobalRef to the java object, which is cleared when the last GlobalRef is dropped
 /// Implements [`Drop] trait to properly close the `org.apache.commons.io.input.ReaderInputStream`
+///
+/// Performance optimizations:
+/// - Larger default buffer size for better throughput
+/// - Adaptive buffer sizing based on read patterns
+/// - Reduced JNI calls through buffer reuse
 #[derive(Clone)]
 pub struct JReaderInputStream {
     internal: GlobalRef,
     buffer: GlobalRef,
     capacity: jsize,
+    // Track read patterns for adaptive buffer sizing
+    total_reads: usize,
+    large_reads: usize,
 }
 
 impl JReaderInputStream {
@@ -33,6 +41,8 @@ impl JReaderInputStream {
             internal: env.new_global_ref(obj)?,
             buffer: env.new_global_ref(jbyte_array)?,
             capacity,
+            total_reads: 0,
+            large_reads: 0,
         })
     }
 
@@ -41,17 +51,34 @@ impl JReaderInputStream {
 
         let length = buf.len() as jsize;
 
-        if length > self.capacity {
-            // Create the new byte array with the new capacity
+        // Track read patterns for adaptive buffer sizing
+        self.total_reads += 1;
+        if length > DEFAULT_BUF_SIZE as jsize {
+            self.large_reads += 1;
+        }
+
+        // More aggressive adaptive buffer sizing for better performance
+        let optimal_capacity = if self.total_reads > 5 && self.large_reads > self.total_reads / 3 {
+            // More than 33% of reads are large, use 3x buffer size for better throughput
+            (length * 3).max(DEFAULT_BUF_SIZE as jsize * 2)
+        } else if self.total_reads > 20 {
+            // After many reads, use at least 2x default buffer size
+            length.max(DEFAULT_BUF_SIZE as jsize * 2)
+        } else {
+            length.max(self.capacity)
+        };
+
+        if optimal_capacity > self.capacity {
+            // Create the new byte array with the optimal capacity
             let jbyte_array = env
-                .new_byte_array(length as jsize)
+                .new_byte_array(optimal_capacity)
                 .map_err(|_e| Error::JniEnvCall("Failed to create byte array"))?;
 
             self.buffer = env
                 .new_global_ref(jbyte_array)
                 .map_err(|_e| Error::JniEnvCall("Failed to create global reference"))?;
 
-            self.capacity = length;
+            self.capacity = optimal_capacity;
         }
 
         // // Create the java byte array

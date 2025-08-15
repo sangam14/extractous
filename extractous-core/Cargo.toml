@@ -29,6 +29,13 @@ bytemuck =  { version = "1.17.1"}
 # String enums
 strum = { version = "0.26.2" }
 strum_macros = { version = "0.26.2" }
+# Performance optimizations
+memmap2 = { version = "0.9", optional = true }
+rayon = { version = "1.8", optional = true }
+# Pure Rust parsers for common formats
+pdf-extract = { version = "0.7", optional = true }
+calamine = { version = "0.22", optional = true }
+quick-xml = { version = "0.31", optional = true }
 
 [dev-dependencies]
 textdistance = "1.1.0"
@@ -46,7 +53,20 @@ flate2 = "1.0.33"
 tar = "0.4.41"
 walkdir = "2.5.0"
 
+[features]
+default = ["mmap", "parallel"]
+# Memory-mapped file I/O for better performance
+mmap = ["memmap2"]
+# Parallel processing support
+parallel = ["rayon"]
+# Pure Rust parsers (experimental)
+pure-rust = ["pdf-extract", "calamine", "quick-xml"]
+# All optimizations enabled
+full-optimizations = ["mmap", "parallel", "pure-rust"]
+
 [profile.release]
 opt-level = 3
 lto = "thin"
 rpath = true
+# Enable CPU-specific optimizations
+codegen-units = 1
